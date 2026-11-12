@@ -3124,8 +3124,10 @@ function codigoSkuLibre(prefijo, numero, usados, contadores, bloque){
   return codigo;
 }
 function avisarCodigoRepetido(tipo, codigo, fila){
-  avisar(tipo + ' repetido', 'El ' + tipo + ' "' + escaparHtml(String(codigo).trim()) + '" ya lo tiene "' + escaparHtml(descripcionDeFila(fila)) +
-    '". No se guardó: cada variante debe tener un código distinto. Si es el mismo artículo, búscalo e imprímelo desde ahí.');
+  // Regla fija del generador: nunca se permite un código repetido, sin excepciones.
+  avisar(tipo + ' repetido: no permitido', '<b>No se puede usar el ' + tipo + ' "' + escaparHtml(String(codigo).trim()) + '"</b> porque ya lo tiene "' + escaparHtml(descripcionDeFila(fila)) +
+    '".<br><br>Cada artículo y cada talla debe tener su propio código; el generador no permite repetirlos. No se guardó nada.' +
+    '<br><br>Si necesitas reimprimir la etiqueta de ese artículo, busca el código y presiona Imprimir.');
 }
 
 // Códigos que hoy están repetidos en el archivo (pueden venir así desde Shopify): {codigo: [filas]}.
