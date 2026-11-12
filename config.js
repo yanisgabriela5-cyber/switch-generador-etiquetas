@@ -5,5 +5,5 @@
    La clave "anon" está hecha para ir en la página: la base solo acepta las funciones et_* del esquema. */
 window.CONFIG_ETIQUETAS = {
   url: 'https://voxennbakcreqvrrcprd.supabase.co',
-  claveAnon: ''
+  claveAnon: 'sb_publishable_c-wMZcQgTgUzXyyhaL9ulw_nNdrf7xi'
 };
