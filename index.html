@@ -394,6 +394,8 @@
   .tarjeta-producto table.tabla-datos tbody tr:hover{background:var(--superficie-suave);}
   .tarjeta-producto table.tabla-datos td{vertical-align:middle;}
   tr.fila-pendiente > td:first-child{box-shadow:inset 3px 0 0 var(--pendiente-borde);}
+  .tarjeta-producto table.tabla-datos tbody tr.fila-coincide{background:#E6F7F4;}
+  .tarjeta-producto table.tabla-datos tbody tr.fila-coincide > td.c-variante{font-weight:700;color:var(--tinta);}
   .tarjeta-producto .btn{width:auto;padding:5px 11px;font-size:12px;}
   .celda-acciones{display:flex;gap:6px;white-space:nowrap;}
   .codigo{font-family:ui-monospace,'Cascadia Mono',Consolas,'Courier New',monospace;font-size:12.5px;color:var(--tinta);}
@@ -739,7 +741,7 @@
     <div class="buscador-sku">
       <div class="campo-busqueda">
         <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
-        <input type="text" id="sku-busqueda-articulo" placeholder="Buscar artículo por nombre" oninput="renderizarBusquedaArticuloSku()" autocomplete="off" aria-label="Buscar artículo por nombre">
+        <input type="text" id="sku-busqueda-articulo" placeholder="Buscar por nombre, SKU o código de barra" oninput="renderizarBusquedaArticuloSku()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.select();}" autocomplete="off" aria-label="Buscar artículo por nombre, SKU o código de barra">
       </div>
       <button class="btn secundario" onclick="mostrarFormularioArticuloNuevo()"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>Artículo nuevo</button>
     </div>
@@ -2710,6 +2712,11 @@ function actualizarResumenSku(){
   cifras.innerHTML = '<span><strong>' + conCodigo.toLocaleString('es-PA') + '</strong> de ' + total.toLocaleString('es-PA') +
     ' variantes tienen código (' + pct + '%)</span>' +
     '<span>Pendientes: <strong>' + (total - conCodigo).toLocaleString('es-PA') + '</strong></span>';
+  const nRepetidos = codigosRepetidos(colSku).length + codigosRepetidos(colBarra).length;
+  if(nRepetidos > 0){
+    cifras.innerHTML += '<button class="btn-texto" style="color:var(--alerta);" onclick="mostrarCodigosRepetidos()">⚠ ' +
+      nRepetidos.toLocaleString('es-PA') + (nRepetidos === 1 ? ' código repetido' : ' códigos repetidos') + ' en el archivo</button>';
+  }
   barra.style.width = pct + '%';
 }
 
@@ -2888,6 +2895,7 @@ function detectarFilasSinSku(){
   // El nombre (ej. Título) solo viene lleno en la primera fila de cada producto en el CSV de Shopify;
   // esto lo "hereda" hacia abajo para que TODAS las variantes compartan el mismo nombre en el SKU.
   const nombresEfectivos = (colCategoria && colHandle) ? construirNombreConRespaldos(colHandle, colCategoria) : null;
+  const usados = conjuntoSkusUsados(colSku);
 
   filasDetectadasSku = indices.map(i => {
     const fila = excelFilas[i];
@@ -2895,8 +2903,7 @@ function detectarFilasSinSku(){
     const catFinal = colCategoria ? construirCodigoDesdeNombre(nombreFuente) : 'GN';
     const clave = catFinal;
     const siguiente = siguienteNumeroSku(clave, (contadores[clave] || 0) + 1, 200);
-    contadores[clave] = Math.max(contadores[clave] || 0, siguiente);
-    const propuesto = catFinal + String(siguiente).padStart(5, '0');
+    const propuesto = codigoSkuLibre(clave, siguiente, usados, contadores, 200);
     return {indice: i, propuesto, tipo: prep.tipos.get(i) || '', copias: prep.copias.get(i) || 1};
   });
 
@@ -2959,7 +2966,17 @@ function cambiarFilasPorPaginaSku(valor){
 }
 
 function editarSkuPropuesto(idx, valor){
-  if(filasDetectadasSku[idx]) filasDetectadasSku[idx].propuesto = valor.trim();
+  const item = filasDetectadasSku[idx];
+  if(!item) return;
+  const nuevo = valor.trim();
+  const enArchivo = indiceDeFilaConSku(nuevo, new Set([item.indice]));
+  const enLote = filasDetectadasSku.findIndex((x, k) => k !== idx && normalizarCodigo(x.propuesto) === normalizarCodigo(nuevo));
+  if(nuevo && (enArchivo >= 0 || enLote >= 0)){
+    renderizarTablaSku(); // vuelve a mostrar el valor anterior
+    avisarCodigoRepetido('SKU', nuevo, enArchivo >= 0 ? enArchivo : filasDetectadasSku[enLote].indice);
+    return;
+  }
+  item.propuesto = nuevo;
 }
 
 // Barra reutilizable de "Anterior / Siguiente" + tamaño de página, usada en las tablas grandes
@@ -2980,6 +2997,17 @@ function aplicarSkuGenerados(silencioso){
   const colSku = document.getElementById('sku-col-sku').value;
   if(!colSku){ avisar('Falta columna', 'Selecciona la columna de SKU.'); return; }
   if(filasDetectadasSku.length === 0){ avisar('Nada que aplicar', 'Primero detecta las filas sin SKU.'); return; }
+
+  // Última revisión antes de escribir: mientras se revisaba el lote, otra persona pudo usar alguno de estos códigos.
+  const enLote = new Set(filasDetectadasSku.map(x => x.indice));
+  const usadosFuera = new Set();
+  excelFilas.forEach((f, i) => { if(!enLote.has(i)){ const v = normalizarCodigo(f[colSku]); if(v) usadosFuera.add(v); } });
+  const choques = filasDetectadasSku.filter(x => usadosFuera.has(normalizarCodigo(x.propuesto)));
+  if(choques.length){
+    avisar('Códigos ya usados', choques.length + ' de los SKU propuestos ya los tiene otra variante (por ejemplo "' + escaparHtml(choques[0].propuesto) +
+      '"). Presiona otra vez "Detectar filas sin SKU" para proponer códigos nuevos; no se aplicó nada.');
+    return;
+  }
 
   filasDetectadasSku.forEach(item => {
     excelFilas[item.indice][colSku] = item.propuesto;
@@ -3058,18 +3086,77 @@ function enviarSkuAImprimir(){
   actualizarEstadoLote();
 }
 
-/* ---- Modo pieza por pieza: buscar un artículo, generar su SKU e imprimir de una vez ---- */
-// Busca otra fila que ya use este SKU (para avisar si se repite; no bloquea nada porque puede ser una reimpresión)
-function indiceDeFilaConSku(sku, excluir){
-  const colSku = document.getElementById('sku-col-sku').value;
-  const objetivo = valorSkuLimpio(sku);
-  if(!colSku || !objetivo) return -1;
+/* ---- Códigos sin repetir ----
+   Un SKU o un código de barra no puede quedar en dos variantes. Se comparan sin espacios, sin la comilla de Shopify
+   y sin distinguir mayúsculas ("sg00001" = "SG00001"). */
+function normalizarCodigo(v){ return valorSkuLimpio(v).replace(/\s+/g, '').toUpperCase(); }
+
+// Fila (distinta de las excluidas) que ya tiene ese código en la columna indicada; -1 si nadie lo tiene.
+function indiceDeFilaConCodigo(columna, codigo, excluir){
+  const objetivo = normalizarCodigo(codigo);
+  if(!columna || !objetivo) return -1;
   for(let i = 0; i < excelFilas.length; i++){
     if(excluir && excluir.has(i)) continue;
-    if(valorSkuLimpio(excelFilas[i][colSku]) === objetivo) return i;
+    if(normalizarCodigo(excelFilas[i][columna]) === objetivo) return i;
   }
   return -1;
 }
+function indiceDeFilaConSku(sku, excluir){
+  return indiceDeFilaConCodigo(document.getElementById('sku-col-sku').value, sku, excluir);
+}
+function conjuntoSkusUsados(colSku){
+  const usados = new Set();
+  if(colSku) excelFilas.forEach(f => { const v = normalizarCodigo(f[colSku]); if(v) usados.add(v); });
+  return usados;
+}
+// Siguiente código libre para el prefijo: si el número propuesto ya existe en el archivo (por ejemplo, alguien lo
+// escribió a mano), pide el siguiente hasta encontrar uno que nadie use.
+function codigoSkuLibre(prefijo, numero, usados, contadores, bloque){
+  let n = numero;
+  let codigo = prefijo + String(n).padStart(5, '0');
+  let intentos = 0;
+  while(usados.has(codigo) && intentos++ < 5000){
+    n = siguienteNumeroSku(prefijo, n + 1, bloque);
+    codigo = prefijo + String(n).padStart(5, '0');
+  }
+  contadores[prefijo] = Math.max(contadores[prefijo] || 0, n);
+  usados.add(codigo);
+  return codigo;
+}
+function avisarCodigoRepetido(tipo, codigo, fila){
+  avisar(tipo + ' repetido', 'El ' + tipo + ' "' + escaparHtml(String(codigo).trim()) + '" ya lo tiene "' + escaparHtml(descripcionDeFila(fila)) +
+    '". No se guardó: cada variante debe tener un código distinto. Si es el mismo artículo, búscalo e imprímelo desde ahí.');
+}
+
+// Códigos que hoy están repetidos en el archivo (pueden venir así desde Shopify): {codigo: [filas]}.
+function codigosRepetidos(columna){
+  const porCodigo = new Map();
+  if(!columna) return [];
+  const esImagen = crearDetectorFilaSoloImagen();
+  excelFilas.forEach((f, i) => {
+    if(esImagen(f)) return;
+    const v = normalizarCodigo(f[columna]);
+    if(!v) return;
+    if(!porCodigo.has(v)) porCodigo.set(v, []);
+    porCodigo.get(v).push(i);
+  });
+  return Array.from(porCodigo.entries()).filter(([, filas]) => filas.length > 1);
+}
+function mostrarCodigosRepetidos(){
+  const partes = [];
+  [['SKU', document.getElementById('sku-col-sku').value], ['Código de barra', document.getElementById('sku-col-barcode').value]].forEach(([nombre, col]) => {
+    const rep = codigosRepetidos(col);
+    if(rep.length === 0) return;
+    partes.push('<b>' + nombre + ' repetidos: ' + rep.length + '</b><br>' + rep.slice(0, 40).map(([codigo, filas]) =>
+      '<span class="codigo">' + escaparHtml(codigo) + '</span>: ' + filas.slice(0, 4).map(i => escaparHtml(descripcionDeFila(i))).join('; ') + (filas.length > 4 ? '…' : '')
+    ).join('<br>') + (rep.length > 40 ? '<br>… y ' + (rep.length - 40) + ' más.' : ''));
+  });
+  avisar('Códigos repetidos en el archivo', partes.length
+    ? '<div style="max-height:50vh;overflow:auto;font-size:12.5px;">' + partes.join('<br><br>') + '</div><p class="nota">Corrígelos escribiendo el código correcto en la variante que corresponda (búscala por el código).</p>'
+    : 'No hay códigos repetidos.');
+}
+
+/* ---- Modo pieza por pieza: buscar un artículo, generar su SKU e imprimir de una vez ---- */
 
 function descripcionDeFila(i){
   const fila = excelFilas[i];
@@ -3085,16 +3172,17 @@ function actualizarSkuBusqueda(indice, valor){
   if(!colSku){ avisar('Falta columna', 'Elige primero la columna de SKU en "Columnas del archivo", al final de esta pantalla.'); return; }
   const nuevo = String(valor ?? '').trim();
   const repetida = nuevo ? indiceDeFilaConSku(nuevo, new Set([indice])) : -1;
+  if(repetida >= 0){
+    renderizarBusquedaArticuloSku(); // vuelve a mostrar el valor anterior
+    avisarCodigoRepetido('SKU', nuevo, repetida);
+    return;
+  }
 
   excelFilas[indice][colSku] = nuevo;
   renderizarTablaFilas();
   renderizarLienzo();
   renderizarBusquedaArticuloSku();
   programarAutoguardado();
-
-  if(repetida >= 0){
-    avisar('SKU repetido', 'El SKU "' + nuevo + '" ya lo tiene "' + descripcionDeFila(repetida) + '". Se guardó igual, por si es una reimpresión; revisa que sea el correcto.');
-  }
 }
 
 // En el export de Shopify cada imagen extra de un producto viene en una fila propia, sin datos de variante (sin precio,
@@ -3234,16 +3322,29 @@ function renderizarBusquedaArticuloSku(){
   const titulosEfectivos = construirTituloEfectivoPorFila(colHandle, colNombre);
 
   // 1) ¿qué HANDLES (productos) coinciden con la búsqueda? — por título heredado o por el propio handle
+  // También por código: SKU o código de barra (sirve con el lector de códigos). Las variantes que coinciden por código se resaltan.
+  const terminoCodigo = normalizarCodigo(terminoBusquedaSku);
+  const filasPorCodigo = new Set();
   const handlesCoincidentes = [];
   const vistos = new Set();
   excelFilas.forEach((fila, i) => {
     const handle = String(fila[colHandle] ?? '');
+    const porCodigo = terminoCodigo.length >= 3 && (
+      (colSku && normalizarCodigo(fila[colSku]).includes(terminoCodigo)) ||
+      (colBarra && normalizarCodigo(fila[colBarra]).includes(terminoCodigo)));
+    if(porCodigo) filasPorCodigo.add(i);
     if(vistos.has(handle)) return;
-    const coincide = normalizarBusqueda(titulosEfectivos[i]).includes(termino) || normalizarBusqueda(handle).includes(termino);
+    const coincide = porCodigo || normalizarBusqueda(titulosEfectivos[i]).includes(termino) || normalizarBusqueda(handle).includes(termino);
     if(coincide){ handlesCoincidentes.push(handle); vistos.add(handle); }
   });
+  // Si la búsqueda es un código exacto (lo típico al escanear), ese artículo va primero.
+  const exactos = new Set();
+  filasPorCodigo.forEach(i => {
+    const f = excelFilas[i];
+    if((colSku && normalizarCodigo(f[colSku]) === terminoCodigo) || (colBarra && normalizarCodigo(f[colBarra]) === terminoCodigo)) exactos.add(String(f[colHandle] ?? ''));
+  });
   // Los artículos nuevos van primero: están al final del archivo y, con el límite de resultados, quedarían ocultos.
-  handlesCoincidentes.sort((a, b) => Number(esArticuloNuevoManual(b)) - Number(esArticuloNuevoManual(a)));
+  handlesCoincidentes.sort((a, b) => (Number(exactos.has(b)) - Number(exactos.has(a))) || (Number(esArticuloNuevoManual(b)) - Number(esArticuloNuevoManual(a))));
 
   if(handlesCoincidentes.length === 0){
     const formAbierto = document.getElementById('form-articulo-nuevo').style.display === 'block';
@@ -3325,7 +3426,7 @@ function renderizarBusquedaArticuloSku(){
       const marcada = filasMarcadasBusqueda.has(i);
       const cantidad = filasMarcadasBusqueda.get(i) || 1;
 
-      html += '<tr class="' + (tieneCodigo ? '' : 'fila-pendiente') + '">' +
+      html += '<tr class="' + (tieneCodigo ? '' : 'fila-pendiente') + (filasPorCodigo.has(i) ? ' fila-coincide' : '') + '">' +
         '<td class="c-marca"><input type="checkbox" aria-label="Marcar ' + escaparHtml(variante) + '" ' + (marcada ? 'checked' : '') + ' onchange="alternarMarcaBusqueda(' + i + ', this.checked)"></td>' +
         '<td class="c-cant" data-label="Cant."><input type="number" min="1" class="entrada-corta" aria-label="Cantidad de etiquetas" value="' + cantidad + '" onchange="actualizarCantidadBusqueda(' + i + ', this.value)"></td>' +
         '<td class="c-variante">' + (variante === '(única variante)' ? '<span class="sin-valor">Única variante</span>' : escaparHtml(variante)) + '</td>' +
@@ -3362,8 +3463,7 @@ function calcularYAsignarSku(indice){
   const catFinal = colCategoria ? construirCodigoDesdeNombre(nombreFuente) : 'GN';
   const clave = catFinal;
   const siguiente = siguienteNumeroSku(clave, (contadores[clave] || 0) + 1);
-  contadores[clave] = Math.max(contadores[clave] || 0, siguiente);
-  const propuesto = catFinal + String(siguiente).padStart(5, '0');
+  const propuesto = codigoSkuLibre(clave, siguiente, conjuntoSkusUsados(colSku), contadores);
 
   fila[colSku] = propuesto;
   guardarContadoresSku(contadores);
@@ -3450,7 +3550,10 @@ function agregarArticuloNuevo(){
     avisar('Revisa los SKU', 'Escribiste ' + skusPropios.length + ' SKU para ' + tallas.length + ' talla(s). Tiene que haber uno por talla, en el mismo orden.');
     return;
   }
-  const repetidos = skusPropios.filter(s => indiceDeFilaConSku(s) >= 0);
+  const repetidosEntreSi = skusPropios.filter((s, k) => skusPropios.findIndex(x => normalizarCodigo(x) === normalizarCodigo(s)) !== k);
+  if(repetidosEntreSi.length){ avisar('SKU repetido', 'Escribiste dos veces "' + escaparHtml(repetidosEntreSi[0]) + '". Cada talla necesita un SKU distinto.'); return; }
+  const yaUsado = skusPropios.map(s => [s, indiceDeFilaConSku(s)]).find(([, i]) => i >= 0);
+  if(yaUsado){ avisarCodigoRepetido('SKU', yaUsado[0], yaUsado[1]); return; }
   const nombreOpcion = tallas.some(Boolean) ? (obtenerNombreOpcionMasComun() || 'Talla') : '';
   const colPrecio = document.getElementById('sku-col-precio').value || detectarColumnaPrecio();
   const handleNuevo = construirCodigoDesdeNombre(nombre).toLowerCase() + '-manual-' + Date.now().toString().slice(-5);
@@ -3488,7 +3591,6 @@ function agregarArticuloNuevo(){
 
   let mensaje = '"' + nombre + '" se agregó con ' + pluralizar(tallas.length, 'variante', 'variantes') + '. ';
   mensaje += skusPropios.length ? 'Quedaron con el SKU que escribiste.' : 'Usa "Generar SKU" en su tarjeta para darles código.';
-  if(repetidos.length) mensaje += ' Ojo: ' + (repetidos.length === 1 ? 'el SKU ' : 'los SKU ') + repetidos.join(', ') + (repetidos.length === 1 ? ' ya lo usa' : ' ya los usan') + ' otra(s) fila(s); se guardaron igual.';
   avisar('Agregado', mensaje);
 }
 
@@ -3928,15 +4030,21 @@ function cambiarFilasPorPaginaTabla(valor){
 }
 
 function editarCelda(i, columna, valor){
+  const colSku = document.getElementById('sku-col-sku').value;
+  const colBarra = document.getElementById('sku-col-barcode').value;
+  if((columna === colSku || columna === colBarra) && String(valor).trim()){
+    const repetida = indiceDeFilaConCodigo(columna, valor, new Set([i]));
+    if(repetida >= 0){
+      renderizarTablaFilas(); // vuelve a mostrar el valor anterior
+      avisarCodigoRepetido(columna === colSku ? 'SKU' : 'código de barra', valor, repetida);
+      return;
+    }
+  }
   excelFilas[i][columna] = valor;
   renderizarLienzo();
   renderizarTablaFilas();
   renderizarBusquedaArticuloSku();
   programarAutoguardado();
-  if(columna === document.getElementById('sku-col-sku').value && String(valor).trim()){
-    const repetida = indiceDeFilaConSku(valor, new Set([i]));
-    if(repetida >= 0) avisar('SKU repetido', 'El SKU "' + String(valor).trim() + '" ya lo tiene "' + descripcionDeFila(repetida) + '". Se guardó igual, por si es una reimpresión; revisa que sea el correcto.');
-  }
 }
 
 function validarFila(fila){
