@@ -947,7 +947,10 @@ const SYNC = {
 
 function syncUrlBase(){ return (SUPA.url && SUPA.clave) ? SUPA.url : ''; }
 function supaCabeceras(){
-  return {'apikey': SUPA.clave, 'Authorization': 'Bearer ' + SUPA.clave, 'Content-Type': 'application/json'};
+  // Sirve con la clave nueva (sb_publishable_…) y con la antigua "anon" (eyJ…); solo la antigua va también como Bearer.
+  const cab = {'apikey': SUPA.clave, 'Content-Type': 'application/json'};
+  if(SUPA.clave.startsWith('eyJ')) cab['Authorization'] = 'Bearer ' + SUPA.clave;
+  return cab;
 }
 
 // Llama a una función et_* de la base y devuelve su respuesta (JSON).
