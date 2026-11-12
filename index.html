@@ -3291,6 +3291,25 @@ function pluralizar(n, singular, plural){
   return n + ' ' + (n === 1 ? singular : plural);
 }
 
+// Barra con el conteo de marcadas y las acciones; se puede refrescar sola, sin volver a dibujar los resultados.
+function htmlBarraSeleccion(){
+  const totalEtiquetasMarcadas = Array.from(filasMarcadasBusqueda.values()).reduce((suma, n) => suma + n, 0);
+  const sinMarcas = filasMarcadasBusqueda.size === 0 ? ' disabled' : '';
+  return '<div class="barra-seleccion">' +
+    '<span class="conteo"><b>' + filasMarcadasBusqueda.size + '</b> ' + (filasMarcadasBusqueda.size === 1 ? 'variante marcada' : 'variantes marcadas') +
+      ', <b>' + totalEtiquetasMarcadas + '</b> ' + (totalEtiquetasMarcadas === 1 ? 'etiqueta' : 'etiquetas') + '</span>' +
+    '<button class="btn-texto" onclick="marcarTodosResultadosBusqueda(true)">Marcar todo lo mostrado</button>' +
+    '<button class="btn-texto" onclick="marcarTodosResultadosBusqueda(false)">Desmarcar todo</button>' +
+    '<button class="btn secundario"' + sinMarcas + ' onclick="generarSkuParaMarcadas()" title="Genera el código de las marcadas que aún no lo tienen">' + iconoSvg('plus') + 'Generar SKU</button>' +
+    '<button class="btn secundario"' + sinMarcas + ' onclick="enviarAImprimirRemoto()" title="Manda las marcadas a la impresora de la computadora">' + iconoSvg('monitor') + 'Enviar a la PC</button>' +
+    '<button class="btn"' + sinMarcas + ' onclick="imprimirMarcadasBusqueda()" title="Imprime las marcadas en esta computadora">' + iconoSvg('print') + 'Imprimir</button>' +
+    '</div>';
+}
+function refrescarBarraSeleccion(){
+  const barra = document.querySelector('#contenedor-busqueda-sku .barra-seleccion');
+  if(barra) barra.outerHTML = htmlBarraSeleccion();
+}
+
 function renderizarBusquedaArticuloSku(){
   const cont = document.getElementById('contenedor-busqueda-sku');
   if(!cont) return;
@@ -3364,17 +3383,7 @@ function renderizarBusquedaArticuloSku(){
   const handlesAMostrar = handlesCoincidentes.slice(0, LIMITE_PRODUCTOS);
   indicesUltimaBusquedaSku = []; // se llena abajo con todo lo que quede visible, para "marcar todo lo mostrado"
 
-  const totalEtiquetasMarcadas = Array.from(filasMarcadasBusqueda.values()).reduce((suma, n) => suma + n, 0);
-  const sinMarcas = filasMarcadasBusqueda.size === 0 ? ' disabled' : '';
-  let html = '<div class="barra-seleccion">' +
-    '<span class="conteo"><b>' + filasMarcadasBusqueda.size + '</b> ' + (filasMarcadasBusqueda.size === 1 ? 'variante marcada' : 'variantes marcadas') +
-      ', <b>' + totalEtiquetasMarcadas + '</b> ' + (totalEtiquetasMarcadas === 1 ? 'etiqueta' : 'etiquetas') + '</span>' +
-    '<button class="btn-texto" onclick="marcarTodosResultadosBusqueda(true)">Marcar todo lo mostrado</button>' +
-    '<button class="btn-texto" onclick="marcarTodosResultadosBusqueda(false)">Desmarcar todo</button>' +
-    '<button class="btn secundario"' + sinMarcas + ' onclick="generarSkuParaMarcadas()" title="Genera el código de las marcadas que aún no lo tienen">' + iconoSvg('plus') + 'Generar SKU</button>' +
-    '<button class="btn secundario"' + sinMarcas + ' onclick="enviarAImprimirRemoto()" title="Manda las marcadas a la impresora de la computadora">' + iconoSvg('monitor') + 'Enviar a la PC</button>' +
-    '<button class="btn"' + sinMarcas + ' onclick="imprimirMarcadasBusqueda()" title="Imprime las marcadas en esta computadora">' + iconoSvg('print') + 'Imprimir</button>' +
-    '</div>';
+  let html = htmlBarraSeleccion();
 
   // La columna "Código de barra" solo se muestra si alguna de las filas visibles tiene uno (en la mayoría de los
   // exports de Shopify está vacía y solo ocuparía espacio).
@@ -3430,7 +3439,7 @@ function renderizarBusquedaArticuloSku(){
 
       html += '<tr class="' + (tieneCodigo ? '' : 'fila-pendiente') + (filasPorCodigo.has(i) ? ' fila-coincide' : '') + '">' +
         '<td class="c-marca"><input type="checkbox" aria-label="Marcar ' + escaparHtml(variante) + '" ' + (marcada ? 'checked' : '') + ' onchange="alternarMarcaBusqueda(' + i + ', this.checked)"></td>' +
-        '<td class="c-cant" data-label="Cant."><input type="number" min="1" class="entrada-corta" aria-label="Cantidad de etiquetas" value="' + cantidad + '" onchange="actualizarCantidadBusqueda(' + i + ', this.value)"></td>' +
+        '<td class="c-cant" data-label="Cant."><input type="number" min="1" class="entrada-corta" aria-label="Cantidad de etiquetas" data-cant="' + i + '" value="' + cantidad + '" oninput="actualizarCantidadBusqueda(' + i + ', this.value)"></td>' +
         '<td class="c-variante">' + (variante === '(única variante)' ? '<span class="sin-valor">Única variante</span>' : escaparHtml(variante)) + '</td>' +
         '<td class="c-sku" data-label="SKU"><input type="text" class="entrada-sku" aria-label="SKU (se puede cambiar a mano)" title="Puedes escribir o cambiar el SKU a mano" placeholder="Escribir SKU" value="' + escaparHtml(skuMostrar) + '" onchange="actualizarSkuBusqueda(' + i + ', this.value)"></td>' +
         (hayBarras ? '<td class="col-secundaria">' + (barra ? '<span class="codigo">' + escaparHtml(barra) + '</span>' : '<span class="sin-valor">—</span>') + '</td>' : '') +
@@ -3700,8 +3709,9 @@ function imprimirIndices(indices){
   imprimirListaConCantidades(indices.map(i => [i, 1]));
 }
 
+// "Imprimir" de una talla: usa la cantidad de su casilla "Cant." (antes imprimía siempre 1).
 function imprimirFilaIndividual(indice){
-  imprimirIndices([indice]);
+  imprimirListaConCantidades([[indice, cantidadEscritaBusqueda(indice)]]);
 }
 
 function alternarMarcaBusqueda(indice, marcada){
@@ -3710,11 +3720,22 @@ function alternarMarcaBusqueda(indice, marcada){
   renderizarBusquedaArticuloSku();
 }
 
+// Lee la cantidad escrita en la casilla "Cant." de esa talla (lo que se ve en pantalla es lo que se imprime).
+function cantidadEscritaBusqueda(indice){
+  const entrada = document.querySelector('#contenedor-busqueda-sku input[data-cant="' + indice + '"]');
+  const n = parseInt(entrada ? entrada.value : '', 10);
+  if(!isNaN(n) && n > 0) return n;
+  return filasMarcadasBusqueda.get(indice) || 1;
+}
 function actualizarCantidadBusqueda(indice, valor){
   const n = parseInt(valor, 10);
+  if(isNaN(n) || n < 1) return; // casilla a medio escribir: se espera al número completo
   // Escribir una cantidad marca la fila automáticamente — no hace falta tildar el checkbox aparte.
-  filasMarcadasBusqueda.set(indice, (!isNaN(n) && n > 0) ? n : 1);
-  renderizarBusquedaArticuloSku();
+  // No se vuelve a dibujar la lista: así no se pierde el clic en "Imprimir" justo después de escribir.
+  filasMarcadasBusqueda.set(indice, n);
+  const marca = document.querySelector('#contenedor-busqueda-sku input[data-cant="' + indice + '"]')?.closest('tr')?.querySelector('input[type="checkbox"]');
+  if(marca) marca.checked = true;
+  refrescarBarraSeleccion();
 }
 
 function marcarTodosResultadosBusqueda(marcar){
@@ -3726,7 +3747,7 @@ function marcarTodosResultadosBusqueda(marcar){
 }
 
 function imprimirMarcadasBusqueda(){
-  imprimirListaConCantidades(Array.from(filasMarcadasBusqueda.entries()));
+  imprimirListaConCantidades(Array.from(filasMarcadasBusqueda.keys()).map(i => [i, cantidadEscritaBusqueda(i)]));
 }
 
 /* ============ IMPRESIÓN REMOTA (celular -> computadora, por internet) ============
@@ -3762,7 +3783,7 @@ async function enviarAImprimirRemoto(){
   if(faltaConexionEnLinea()) return;
   if(filasMarcadasBusqueda.size === 0){ avisar('Nada marcado', 'Marca al menos una variante para enviar a imprimir.'); return; }
 
-  const trabajos = Array.from(filasMarcadasBusqueda.entries()).map(([i, cantidad]) => ({datos: excelFilas[i], cantidad}));
+  const trabajos = Array.from(filasMarcadasBusqueda.keys()).map(i => ({datos: excelFilas[i], cantidad: cantidadEscritaBusqueda(i)}));
   const estado = document.getElementById('estado-remoto');
   try{
     await supaRpc('et_imprimir_enviar', {p_trabajos: trabajos}, 20000);
