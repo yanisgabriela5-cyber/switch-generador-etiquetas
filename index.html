@@ -328,10 +328,14 @@
     position:fixed;top:14px;right:14px;z-index:7001;padding:9px 16px;background:var(--azul);color:#fff;
     border:none;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;
   }
-  .pagina-etiqueta{page-break-after:always;}
+  /* Cada etiqueta es una hoja. El salto va DESPUÉS de cada una menos la última (si no, sale una hoja en blanco al final),
+     y lo que sobresalga del borde se recorta (si no, el sobrante pasa a otra hoja que sale en blanco). */
+  .pagina-etiqueta{position:relative;overflow:hidden;break-inside:avoid;page-break-inside:avoid;break-after:page;page-break-after:always;}
+  .pagina-etiqueta:last-child{break-after:auto;page-break-after:auto;}
 
   @media print{
-    html, body{margin:0 !important;padding:0 !important;}
+    html, body{margin:0 !important;padding:0 !important;height:auto !important;min-height:0 !important;overflow:visible !important;}
+    #paginas-impresion{margin:0;padding:0;}
     body > *:not(#zona-impresion){display:none !important;}
     .btn-cerrar-impresion{display:none !important;}
     #zona-impresion{position:static;overflow:visible;margin:0;padding:0;}
@@ -4032,7 +4036,9 @@ function ejecutarSiguienteLote(){
     pagina.className = 'pagina-etiqueta';
     pagina.style.position = 'relative';
     pagina.style.width = plantilla.anchoMm + 'mm';
-    pagina.style.height = plantilla.altoMm + 'mm';
+    // Un poco menos que la hoja: el redondeo del navegador a veces suma una fracción y empuja una hoja en blanco.
+    // No se nota en la etiqueta (son 0.3 mm al borde inferior) ni se acumula, porque cada etiqueta empieza hoja nueva.
+    pagina.style.height = Math.max(plantilla.altoMm - 0.3, 1) + 'mm';
 
     plantilla.elementos.forEach(el => {
       const div = document.createElement('div');
